@@ -1,6 +1,7 @@
 from torch.utils.data import DataLoader, Dataset
 import torch
 import torch.nn as nn
+torch.set_default_dtype(torch.float64)
 
 def train(model: nn.Module,
           train_dataset: Dataset,
@@ -28,6 +29,8 @@ def train(model: nn.Module,
             y_hat = model(x)
 
             loss = criterion(y_hat, y)
+            loss += (1e-4 / (2*len(train_dataset))) * sum(torch.sum(p * p) for p in model.parameters())
+            loss += (1e-4 / (len(train_dataset))) * sum(torch.log(torch.cosh(2.3099 * p)).sum() for p in model.parameters())
             loss.backward()
 
             return loss

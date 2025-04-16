@@ -7,6 +7,7 @@ from sklearn.metrics import (accuracy_score,
                      precision_score,
                      recall_score,
                      f1_score)
+torch.set_default_dtype(torch.float64)
 
 def test(model: nn.Module, test_dataset: Dataset, device: torch.device) -> dict:
     model.eval()
