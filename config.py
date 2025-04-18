@@ -7,4 +7,4 @@ class Config:
     momentum: float = 0.0
     epochs: int = 1000
     batch_size: int = 64
-    gmin: float = 0.001
+    gmin: float = 0.01

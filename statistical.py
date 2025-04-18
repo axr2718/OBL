@@ -11,100 +11,66 @@ from torch.nn.utils import parameters_to_vector
 from torch.special import gammainc
 from test import test
 torch.set_default_dtype(torch.float64)
+from digits_dataset import DigitsDataset
 
-# def compute_fisher(model: nn.Module, x: torch.Tensor, y: torch.Tensor, len_dataset: int) -> dict:
-#     def compute_loss(params, x, y):
-#         x = x.unsqueeze(0)
-#         y = y.unsqueeze(0)
-#         y_hat = functional_call(model, params, (x,))
-#         loss = F.cross_entropy(y_hat, y)
-#         return loss
+def compute_fisher(model: nn.Module, x: torch.Tensor, y: torch.Tensor, len_dataset: int) -> dict:
+    def compute_loss(params, x, y):
+        x = x.unsqueeze(0)
+        y = y.unsqueeze(0)
+        y_hat = functional_call(model, params, (x,))
+        loss = F.cross_entropy(y_hat, y)
+        return loss
 
-#     params = {k: v.detach() for k, v in model.named_parameters()}
-#     grad_loss = grad(compute_loss)
-#     all_grads = vmap(grad_loss, in_dims=(None, 0, 0))
-#     grads = all_grads(params, x, y)
-
-#     G = []
-
-#     for layer_name in grads.keys():
-#         #print(grads[layer_name][0])
-#         G.append(grads[layer_name].reshape(len_dataset, -1))
-
-
-#     G = torch.cat(G, dim=1)
-#     B = (G.T @ G) / len_dataset
-
-#     return B
-
-def compute_fisher(model: nn.Module, dataset: Dataset):
-    model.train()
+    params = {k: v.detach() for k, v in model.named_parameters()}
+    grad_loss = grad(compute_loss)
+    all_grads = vmap(grad_loss, in_dims=(None, 0, 0))
+    grads = all_grads(params, x, y)
 
     G = []
 
-    for x, y in dataset:
-        x = x.unsqueeze(0)
-        x = x.to('cuda')
-        y = torch.tensor(y)
-        y = y.to('cuda')
-        y = y.unsqueeze(0)
+    for layer_name in grads.keys():
+        #print(grads[layer_name][0])
+        G.append(grads[layer_name].reshape(len_dataset, -1))
 
-        y_hat = model(x)
-        loss = F.cross_entropy(y_hat, y)
 
-        dW = list(torch.autograd.grad(loss, list(model.parameters())))
-        dW = torch.cat(dW, dim=1).reshape(1, -1)
-        G.append(dW)
-
-    G = torch.vstack(G)
-
-    B = (G.T @ G) / len(dataset)
+    G = torch.cat(G, dim=1)
+    B = (G.T @ G) / len_dataset
 
     return B
 
-    
+# def compute_fisher(model: nn.Module, dataset: Dataset):
+#     model.train()
 
-def compute_hessian(model: nn.Module, x: torch.Tensor, y: torch.Tensor):
-    model.train()
-    params = torch.nn.utils.parameters_to_vector(model.parameters())
-    
-    def loss_fn(flat_params):
-        # Save original parameters
-        orig_params = torch.nn.utils.parameters_to_vector(model.parameters()).detach().clone()
-        
-        # Update model
-        torch.nn.utils.vector_to_parameters(flat_params, model.parameters())
-        
-        # Forward pass
-        y_hat = model(x)
-        loss = F.cross_entropy(y_hat, y)
-        
-        # Restore original parameters before returning
-        # (this helps avoid issues with the computational graph)
-        torch.nn.utils.vector_to_parameters(orig_params, model.parameters())
-        
-        return loss
-    
-    # Use a scaling factor to help with numerical precision
-    scaling_factor = 1.0
-    scaled_loss_fn = lambda p: scaling_factor * loss_fn(p)
-    
-    A = torch.autograd.functional.hessian(scaled_loss_fn, params)
-    print("Hessian min/max:", A.min().item(), A.max().item())
-    
-    return A
+#     G = []
+
+#     for x, y in dataset:
+#         x = x.unsqueeze(0)
+#         x = x.to('cuda')
+#         y = torch.tensor(y)
+#         y = y.to('cuda')
+#         y = y.unsqueeze(0)
+
+#         y_hat = model(x)
+#         loss = F.cross_entropy(y_hat, y)
+
+#         dW = list(torch.autograd.grad(loss, list(model.parameters())))
+#         dW = torch.cat(dW, dim=1).reshape(1, -1)
+#         G.append(dW)
+
+#     G = torch.vstack(G)
+
+#     B = (G.T @ G) / len(dataset)
+
+#     return B
+
     
 
 def compute_p(A: torch.Tensor, B: torch.Tensor, A_pinv: torch.Tensor, S: torch.Tensor, theta: torch.Tensor, C: torch.Tensor, len_dataset: int, tolerance: float) -> float:
     Q = (S@C@S.T)
 
-    #Q_pinv = pinv(Q, hermitian=True, rtol=1e-3, atol=1e-6)
-    Q_pinv = pinv(Q, hermitian=True, rtol=1e-3, atol=1e-9)
+    Q_pinv = pinv(Q, hermitian=True, rtol=1e-3, atol=1e65)
 
     wald = (theta.T@S.T@Q_pinv@S@theta).view(-1) * len_dataset
-
-    if (torch.abs(wald) < 0.01):
-        wald *= 0
 
     r = torch.tensor([float(S.shape[0])]).to('cuda')
 
@@ -117,29 +83,30 @@ def compute_p(A: torch.Tensor, B: torch.Tensor, A_pinv: torch.Tensor, S: torch.T
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 print(f'Using device: {device}')
 
+# transform = torchvision.transforms.Compose([v2.ToImage(),
+#                                             v2.ToDtype(torch.uint8, scale=True),
+#                                             v2.ToDtype(torch.float64, scale=True),
+#                                             v2.Normalize(mean=(0.5,), std=(0.5,))])
 
 
-transform = torchvision.transforms.Compose([v2.ToImage(),
-                                            v2.ToDtype(torch.uint8, scale=True),
-                                            v2.ToDtype(torch.float64, scale=True),
-                                            v2.Normalize(mean=(0.5,), std=(0.5,))])
+# train_dataset = torchvision.datasets.CIFAR10(root='./data', 
+#                                                     train=True,
+#                                                     transform=transform,
+#                                                     download=False)
 
+# test_dataset = torchvision.datasets.CIFAR10(root='./data',
+#                                                      train=False,
+#                                                      transform=transform,
+#                                                      download=False)
 
-train_dataset = torchvision.datasets.CIFAR10(root='./data', 
-                                                    train=True,
-                                                    transform=transform,
-                                                    download=False)
-
-test_dataset = torchvision.datasets.CIFAR10(root='./data',
-                                                     train=False,
-                                                     transform=transform,
-                                                     download=False)
+train_dataset = DigitsDataset(filename='/home/adrian/Data/Digits/optdigits.tra')
+test_dataset = DigitsDataset(filename='/home/adrian/Data/Digits/optdigits.tes')
 
 input_dim = train_dataset[0][0].reshape(-1).size(0)
 output_dim = len(train_dataset.classes)
 
-model_dict = torch.load('./cifar10-mlp-10.pt')
-model = MLP(input_dim=input_dim, hidden_units=10, output_dim=output_dim)
+model_dict = torch.load('./digit-mlp.pt')
+model = MLP(input_dim=input_dim, output_dim=output_dim)
 model.load_state_dict(model_dict, strict=False)
 model.to(device=device)
 
@@ -164,16 +131,16 @@ x, y = next(iter(trainloader))
 x = x.to(device)
 y = y.to(device)
 
-# B = compute_fisher(model=model,
-#                    x=x,
-#                    y=y,
-#                    len_dataset=len(train_dataset))
-
-# A = compute_hessian(model=model, x=x, y=y)
-# exit(0)
-
 B = compute_fisher(model=model,
-                   dataset=train_dataset)
+                   x=x,
+                   y=y,
+                   len_dataset=len(train_dataset))
+
+
+
+
+# B = compute_fisher(model=model,
+#                    dataset=train_dataset)
 
 #B += 1e-4 * torch.eye(B.shape[0], device=B.device)
 
@@ -182,7 +149,7 @@ B = compute_fisher(model=model,
 #     print(f'Rank: {rank}')
 #     print("Locally Parameter Redundant")
 
-B_pinv = pinv(B, hermitian=True, rtol=1e-3, atol=1e-9)
+B_pinv = pinv(B, hermitian=True, rtol=1e-3, atol=1e-6)
 
 
 #C = B_pinv@B@B_pinv
